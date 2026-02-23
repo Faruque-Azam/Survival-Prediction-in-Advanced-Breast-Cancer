@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use this software or data, please cite it as below."
+title: "Survival Prediction in Advanced Breast Cancer Trials"
+abstract: "Code and data for examining endpoint correlations and developing interpretable machine learning models to predict median progression-free survival (mPFS) and median overall survival (mOS) from phase II trial data in advanced breast cancer."
+type: software
+authors:
+  - family-names: "[Last Name]"
+    given-names: "[First Name]"
+    orcid: "https://orcid.org/[ORCID]"
+    affiliation: "[Institution]"
+repository-code: "https://github.com/[username]/survival-prediction-breast-cancer"
+license: MIT
+version: 1.0.0
+date-released: 2026-02-01
+keywords:
+  - advanced breast cancer
+  - surrogate endpoints
+  - progression-free survival
+  - overall survival
+  - decision tree
+  - machine learning
+  - trial-level prediction
+  - endpoint correlation

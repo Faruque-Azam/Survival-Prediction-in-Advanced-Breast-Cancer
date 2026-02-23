@@ -1,0 +1,1042 @@
+---
+title: "Modeling OS in mBC"
+author: "Faruque Azam"
+date: "2026-01-03"
+output: html_document
+---
+
+
+```{r importing dataset and formatting variables, include=FALSE, results='hide'}
+library(tidyverse)
+library(readxl)
+mBC_Dataset_raw = read_excel("mBC_Dataset.xlsx")
+View(mBC_Dataset_raw)
+
+mBC_Dataset_raw = mBC_Dataset_raw %>% 
+  rowwise() %>% 
+     mutate(Combo = paste(na.omit(c_across(T1:T4)), 
+                          collapse = " ")) %>%
+                    ungroup()
+  
+mBC_Dataset = mBC_Dataset_raw %>% 
+    select(Subtype, Pretreated, Stratified, Age, N, wECOG,
+         ORR, mPFS, mOS, Therapy, Therapy_H, Size, Targeted, Targeted_m, Targeted_yn, Chemo_m, Hormonal)  
+
+mBC_Dataset = mBC_Dataset %>%
+  mutate(Size = if_else(Size == "4-Agent",
+                        "3-Agent", Size)) %>% 
+mutate(across(where(is.character), as.factor)) %>% 
+  mutate(Size = factor(Size, levels = 
+                         c("1-Agent", "2-Agent", "3-Agent"),
+      ordered = TRUE))
+
+
+df_Combo = read_excel("mBC_Combo.xlsx") %>% 
+  mutate(across(where(is.numeric), as.factor))
+
+```
+
+```{r imputing missing values}
+library(tidyverse)
+library(VIM)
+library(mice)
+
+aggr(mBC_Dataset)
+md.pattern(mBC_Dataset)
+head(mBC_Dataset)
+
+mBC_Dataset_mice = mBC_Dataset %>%
+    mutate(ORR = replace(ORR, is.na(ORR), median(ORR, na.rm = TRUE)),
+           Age = replace(Age, is.na(Age), median(Age, na.rm = TRUE)),
+           N = replace(N, is.na(N), median(N, na.rm = TRUE)))
+
+  mBC_Dataset_mice = 
+    mice(mBC_Dataset_mice, m = 20, maxit = 30, seed = 329, 
+         method = c("polyreg", "logreg", "logreg", "cart", "cart", "cart", "cart", 
+                    "cart", "cart", "cart", "cart", "cart", "cart",
+                    "polyreg", "logreg", "polyreg", "logreg")) 
+
+
+mBC_Dataset_mice_u  = complete(mBC_Dataset_mice, 20)
+
+summary(mBC_Dataset_mice)
+
+```
+
+
+```{r Feature engineering and final dataset}
+
+mBC_Dataset_mice_u = mBC_Dataset_mice_u %>% 
+rename(mOS_2 = mOS, 
+       mPFS_2 = mPFS, 
+       wECOG_2 = wECOG, 
+       Size_Cat = Size)
+
+mBC_Dataset_mice_u =  bind_cols(mBC_Dataset_mice_u, 
+            mBC_Dataset_raw %>% 
+            select(wECOG, mPFS, mOS, PMID, TTP, Combo, Size)) %>% 
+mutate(Size = as.integer(str_extract(as.character(Size), "\\d+"))) 
+
+mBC_Dataset_mice_u = bind_cols(mBC_Dataset_mice_u, df_Combo)
+
+
+       
+  mBC_Dataset_final = mBC_Dataset_mice_u %>% 
+  mutate(Meno = ifelse(Age < 55, "Premeno", "Postmeno")) %>% 
+     mutate(Age_Cat = factor(case_when(
+        Age <= 50 ~ "Younger",
+        Age <= 60 ~ "Mid-aged",
+        Age <= 80 ~ "Older"),
+      levels = c("Younger", "Mid-aged", "Older"),
+      ordered = TRUE)) %>%
+    mutate(wECOG_Cat = factor(case_when(
+      wECOG_2 < 0.5 ~ "Good",
+      wECOG_2 < 1 ~ "Moderate",
+      wECOG_2 >= 1 ~ "Worse"))) %>% 
+    mutate(across(where(is.character), as.factor)) %>% 
+      mutate(ORR = ORR + 2) %>% 
+      mutate(Size_Cat = factor(Size_Cat, levels = 
+                         c("1-Agent", "2-Agent", "3-Agent"),
+      ordered = TRUE)) %>% 
+      mutate(wECOG_Cat = factor(wECOG_Cat, levels =
+                                c("Good", "Moderate", "Worse",
+                                  ordered = TRUE)))
+  
+view(mBC_Dataset_final)
+
+mBC_Dataset_OS = mBC_Dataset_final %>% 
+  mutate(Combo_sort = str_squish(Combo),
+    Combo_sort = map_chr(str_split(Combo_sort, "\\s+"),
+                         ~ paste(sort(.x), collapse = " "))) %>% 
+  mutate(Combo_sort = factor(Combo_sort)) %>%
+  mutate(Combo_other = fct_lump(Combo_sort, n = 15)) %>% 
+  filter(mPFS_2 < mOS_2) %>% 
+  filter(mOS_2 < 51) %>% 
+  filter(ORR < 100)
+
+```
+
+
+```{r Visualizing imputed variables' distribution}
+
+ab = mBC_Dataset_OS %>% 
+  ggplot(aes(x = mOS)) +
+  geom_density(fill = "steelblue", alpha = 0.3, color = "steelblue") +
+  labs(x= "Median OS (Months)",
+       y= "Density",
+       tag = "a",
+       subtitle = "N = 1084, NAs = 422, 38.8%; median (IQR) 17.00 (12.07–24.25); mean (SD) 18.64 (8.27)") +
+  theme_light(base_size = 9) +
+    theme(plot.caption = element_text(hjust = 0)) +
+  theme(plot.tag = element_text(face = "bold"))
+
+
+ba = mBC_Dataset_OS %>% 
+  ggplot(aes(x = mOS_2)) +
+  geom_density(fill = "steelblue", alpha = 0.3, color = "steelblue") +
+  labs(x= "Imputed Median OS (Months)",
+       y= "Density",
+       tag = "b",
+       subtitle = "N = 1084; median (IQR) 17.40 (12.03–24.90); mean (SD) 18.99 (8.48)") +
+    theme_light(base_size = 9) +
+    theme(plot.caption = element_text(hjust = 0)) +
+  theme(plot.tag = element_text(face = "bold"))
+
+cd = mBC_Dataset_OS %>% 
+  ggplot(aes(x = mPFS)) +
+  geom_density(fill = "steelblue", alpha = 0.3, color = "steelblue") +
+  labs(x= "Median PFS (Months)",
+       y= "Density",
+       tag = "c",
+       subtitle = "N = 1084, NAs = 199, 18.3%; median (IQR) 6.22 (4.10–9.00); mean (SD) 7.01 (3.95)") +
+  theme_light(base_size = 9) +
+    theme(plot.caption = element_text(hjust = 0)) +
+  theme(plot.tag = element_text(face = "bold"))
+
+dc = mBC_Dataset_OS %>% 
+  ggplot(aes(x = mPFS_2)) +
+  geom_density(fill = "steelblue", alpha = 0.3, color = "steelblue") +
+  labs(x= "Imputed Median PFS (Months)",
+       y= "Density",
+       tag = "d",
+       subtitle = "N = 1084; median (IQR) 6.20 (4.10–8.90); mean (SD) 6.94 (3.82)") +
+  theme_light(base_size = 9) +
+    theme(plot.caption = element_text(hjust = 0)) +
+  theme(plot.tag = element_text(face = "bold"))
+
+ef = mBC_Dataset_OS %>%
+  ggplot(aes(x = wECOG)) +
+  geom_density(fill = "steelblue", alpha = 0.3, color = "steelblue") +
+  labs(x= "wECOG",
+       y= "Density",
+       tag = "e",
+       subtitle = "N = 1084, NAs = 321, 29.5%; median (IQR) 0.515 (0.383–0.710); mean (SD) 0.568 (0.287)") +
+  theme_light(base_size = 9) +
+  theme(plot.caption = element_text(hjust = 0)) +
+  theme(plot.tag = element_text(face = "bold"))
+
+fe = mBC_Dataset_OS %>%
+  ggplot(aes(x = wECOG_2)) +
+  geom_density(fill = "steelblue", alpha = 0.3, color = "steelblue") +
+  labs(x= "Imputed wECOG",
+       y= "Density",
+       tag = "f",
+       subtitle = "N = 1084; median (IQR) 0.510 (0.370–0.710); mean (SD) 0.565 (0.293)") +
+  theme_light(base_size = 9) +
+    theme(plot.caption = element_text(hjust = 0)) +
+  theme(plot.tag = element_text(face = "bold"))
+
+
+xp = cowplot::plot_grid(ab,ba, nrow = 1)
+px = cowplot::plot_grid(cd,dc, nrow = 1)
+yp = cowplot::plot_grid(ef,fe, nrow = 1)
+    
+cowplot::plot_grid(xp,px,yp, nrow = 3)
+
+    ggsave(
+  "Density_Imputed.jpg",
+  width = 12,                       
+  height = 12,                      
+  dpi = 600)
+
+```
+
+
+```{r Correlation analysis}
+library(ggplot2)
+library(viridis)  
+library(ggtext) 
+library(ggstatsplot)
+
+ggscatterstats(mBC_Dataset_OS,
+               mPFS_2,
+               mOS_2, 
+               type = "nonparametric")
+
+xy = mBC_Dataset_OS %>% 
+ggplot(aes(x = mPFS_2, y = mOS_2, color = ORR)) +
+  geom_point(size = 1.6, alpha = 0.55) +
+  scale_color_viridis_c(name = "ORR (%)", option = "viridis") +
+  labs(
+    x = "Median PFS (Months)",
+    y = "Median OS (Months)",
+    tag = "c",
+    subtitle = expression(italic("p") == 2.91e-150 ~ ", " ~
+        rho["Spearman"] == 0.68 ~ ", " ~
+        CI["95%"] ~ " [0.65, 0.72], " ~
+        n["pairs"] == 1084)) + 
+  theme_light(base_size = 8.5) + 
+      theme(legend.key.size = unit(0.25, "cm"),
+            legend.position = c(0.077, 0.9),
+            legend.title = element_text(size = 6),
+            legend.text = element_text(size = 5),
+            legend.background = element_rect(fill="NA",
+                                             color="NA"),
+            legend.margin = margin(t= 1.5, r=4.2, b=2, l=2)) +
+  theme(plot.tag = element_text(face = "bold"))
+
+  
+ggscatterstats(mBC_Dataset_OS,
+               ORR,
+               mOS_2, 
+               type = "nonparametric")
+
+set.seed(329)
+yz = mBC_Dataset_OS %>% 
+  filter(ORR_win5 > 2) %>% 
+ggplot(aes(x = ORR, y = mOS_2, color = mPFS_2)) +
+  geom_point(size = 1.6, alpha = 0.55, 
+             position = position_jitter(width = 0.7, height = 0)) +
+  scale_color_viridis_c(name = "Median PFS (Months)", option = "viridis") +
+  labs(
+    x = "ORR (%)",
+    y = "Median OS (Months)",
+    tag = "b",
+    subtitle = expression(italic("p") == 7.99e-56 ~ ", " ~
+        rho["Spearman"] == 0.45 ~ ", " ~
+        CI["95%"] ~ " [0.40, 0.50], " ~
+        n["pairs"] == 1084)) +
+  theme_light(base_size = 8.5) +
+      theme(legend.key.size = unit(0.25, "cm"),
+            legend.position = c(0.13, 0.9),
+            legend.title = element_text(size = 6),
+            legend.text = element_text(size = 5),
+            legend.background = element_rect(fill="NA",
+                                             color="NA"),
+            legend.margin = margin(t= 1.5, r=4.2, b=2, l=2)) +
+  theme(plot.tag = element_text(face = "bold"))
+
+
+ggscatterstats(mBC_Dataset_OS,
+               ORR,
+               mPFS_2, 
+               type = "nonparametric")
+
+set.seed(329)
+zx = mBC_Dataset_OS %>% 
+    filter(ORR > 2) %>%  
+ggplot(aes(x = ORR, y = mPFS_2, color = mOS_2)) +
+  geom_point(size = 1.6, alpha = 0.55,  
+             position = position_jitter(width = 0.6, height = 0)) +
+  scale_color_viridis_c(name = "Median OS (Months)", option = "viridis") +
+  labs(
+    x = "ORR (%)",
+    y = "Median PFS (Months)",
+    tag = "a",
+    subtitle = expression(italic("p") == 2.12e-171 ~ ", " ~
+        rho["Spearman"] == 0.72 ~ ", " ~
+        CI["95%"] ~ " [0.69, 0.75], " ~
+        n["pairs"] == 1084)) +
+  theme_light(base_size = 8.5) +
+        theme(legend.key.size = unit(0.25, "cm"),
+            legend.position = c(0.13, 0.9),
+            legend.title = element_text(size = 6),
+            legend.text = element_text(size = 5),
+            legend.background = element_rect(fill="NA",
+                                             color="NA"),
+            legend.margin = margin(t= 1.5, r=4.2, b=2, l=2)) +
+  theme(plot.tag = element_text(face = "bold"))
+
+
+cowplot::plot_grid(zx, yz, xy, nrow = 1)
+
+```
+
+
+```{r mOS Random Forest Model}
+
+library(tidymodels)
+
+    set.seed(329)
+    ranger_split = mBC_Dataset_OS %>% 
+    filter(mOS_2 < 51) %>% 
+    initial_split(prop = 0.8, 
+                  strata = mOS_2) #change strata to "Subtype"
+    ranger_split
+
+
+  ranger_train = training(ranger_split)
+  ranger_test = testing(ranger_split)
+
+
+ranger_cols_25_46 = names(ranger_train)[25:46]
+ranger_cols_25_46 = setdiff(cols_25_46, "mOS_2")
+
+ranger_train_sub = ranger_train %>%
+  select(mOS_2, mPFS_2, ORR, Subtype, Pretreated, wECOG_2, Size_Cat, Therapy, all_of(ranger_cols_25_46))  
+
+
+ranger_recipe = recipe(mOS_2 ~ ., data = ranger_train_sub) %>% 
+                step_zv(all_numeric_predictors()) %>% 
+                step_normalize(all_numeric_predictors()) %>%
+                step_string2factor() %>% 
+                step_dummy(all_nominal_predictors())
+
+  set.seed(2372)
+  ranger_boot = bootstraps(ranger_train_sub, times = 30,
+                        strata = mOS_2) #change strata to "Subtype"
+
+prep(ranger_recipe)
+
+    ranger_spec =  rand_forest(mtry = tune(), 
+                               min_n = tune(), 
+                               trees = 1000) %>% 
+                  set_mode("regression") %>% 
+                  set_engine("ranger", importance = "permutation") 
+  
+    ranger_workflow = workflow() %>% 
+                      add_recipe(ranger_recipe) %>% 
+                      add_model(ranger_spec) 
+  
+
+  ranger_params = grid_regular(
+  mtry(range  = c(2L, 30L)),
+  min_n(range = c(10L, 30L)),
+  levels = 15)
+  
+  ranger_params
+      
+  set.seed(3299)
+  doParallel::registerDoParallel()
+  
+  ranger_res =
+    tune_grid(ranger_workflow, resamples = ranger_boot, 
+                metrics   = metric_set(mae, rmse, rsq),
+    control   = control_grid(save_pred = TRUE),
+              grid = ranger_params)
+  
+  
+  show_best(ranger_res, metric = "mae")  
+  show_best(ranger_res, metric = "rmse")
+  show_best(ranger_res, metric = "rsq")
+
+    mae_1 =
+    show_best(ranger_res, metric = "mae") %>% 
+    slice(5)
+
+  
+  autoplot(ranger_res) +
+  theme_light() +
+  labs(title = "Random Forest Hyperparameter Tuning", 
+       subtitle = "Bootstrap resamples, n = 30; Analysis set, n = 860, Mean OOB, n = 316 per resample",
+       x = "# Randomly Selected Predictors (mtry)")
+
+  ggsave(
+      "rand_forest_autoplot_combo10.jpg",
+      width = 12,                       
+      height = 6,                      
+      dpi = 600)
+
+  final_ranger = ranger_workflow %>% 
+    finalize_workflow(ranger_params)
+  
+  final_ranger
+
+  ranger_fit = last_fit(final_ranger, ranger_split,
+                      metrics   = metric_set(mae, rmse, rsq))
+  
+  collect_metrics(ranger_fit)  
+
+
+library(vip)
+
+ranger_engine = extract_fit_engine(ranger_fit)
+imp_ranger = ranger::importance(ranger_engine)
+ranger_imp_df = enframe(imp_ranger, name = "Variable", value = "Importance") %>%
+  arrange(desc(Importance))
+
+top10_ranger = ranger_imp_df %>%
+  slice_max(order_by = Importance, n = 15) %>% 
+    mutate(Importance_100 = 100 * Importance / max(Importance, na.rm = TRUE))
+
+
+ggplot(top10_ranger, aes(x = Importance_100, y = reorder(Variable, Importance))) +
+  geom_segment(aes(x = 0, xend = Importance_100, yend = Variable), 
+               linewidth = 0.35) +
+  geom_point(size = 1) +
+  labs(title = "Random Forest Variable Importance Plot",
+       subtitle = "Training set (n = 860); 1000 trees; mtry = 12; min node size = 12; (MAE 4.19; RMSE 5.37)",
+       x = "Variable importance (Normalized)", 
+       y = NULL) +
+  theme_light(base_size = 5)
+
+
+ggsave(
+      "Rand_Forest_vip_mOS.jpg",
+      width = 4,                       
+      height = 2,                      
+      dpi = 900)
+
+
+gf = ranger_fit %>% 
+collect_predictions() %>% 
+  ggplot(aes(x= mOS_2, y = .pred)) +
+  geom_abline(intercept = 0,
+              slope = 1,
+              lty = 2,
+              size = 0.5, 
+              color = "darkred",
+              linetype = "dashed") +
+  geom_point(alpha = 0.7, color = "midnightblue") +
+  scale_y_continuous(limits = c(0, 40)) + 
+   scale_x_continuous(limits = c(0, 50)) +
+  theme_light(base_size = 6) +
+  labs(subtitle = "Random Forest (MAE 3.96; RMSE 5.18)",
+    x = "Observed Median OS (Months)",
+       y = "Predicted Median OS (Months)",
+    tag = "b") +
+  theme(plot.tag = element_text(face = "bold"))
+
+  print(gf)
+  
+ggsave(
+      "Rand_Forest_Pred_mOS.jpg",
+      width = 4,                       
+      height = 3.5,                      
+      dpi = 900)
+
+```
+
+
+```{r mOS Decision Tree Model}
+
+
+library(tidymodels)
+library(patchwork)
+
+  set.seed(786)
+    tree_split = mBC_Dataset_OS %>%
+    rename(
+      Median_OS = mOS_2,
+      Median_PFS = mPFS_2, 
+      wECOG_raw = wECOG,
+    wECOG = wECOG_2,
+    Treatment_Size = Size_Cat,
+    Aromatase_Inhibitor = Aromatase,
+    HER2_Kinase_Inhibitor = HER2_Kinase,
+    Line_of_Therapy = Pretreated) %>% 
+    filter(Median_OS < 51) %>% 
+    initial_split(prop = 0.8, 
+                  strata = Subtype) #change strata to "Subtype"
+    
+  tree_split
+
+  tree_train = training(tree_split)
+  tree_test = testing(tree_split)
+
+  
+
+  tree_recipe = 
+    recipe(formula = Median_OS ~ Median_PFS + ORR + Subtype 
+             + Line_of_Therapy + wECOG + Treatment_Size + Therapy + 
+             HER2_Antibody + Aromatase_Inhibitor + HER2_Kinase_Inhibitor + Antiestrogen + Antimetabolite 
+           + Anthracycline + Platinum, 
+                data = tree_train) %>% 
+                step_string2factor(all_nominal_predictors()) %>% 
+                step_zv(all_numeric_predictors()) %>% 
+                step_normalize(all_numeric_predictors())
+
+tree_recipe
+
+  set.seed(2372)
+  tree_boot = bootstraps(tree_train, times = 30,
+                        strata = Subtype) #change strata to "Subtype"
+
+tree_model = decision_tree(
+  cost_complexity = tune(),
+  tree_depth = tune(),
+  min_n = tune()) %>% 
+  set_engine("rpart", model = TRUE) %>% 
+  set_mode("regression")
+
+
+tree_grid = grid_regular(
+  cost_complexity(),
+  tree_depth(),
+  min_n(), levels = 7)
+
+
+  tree_workflow =   workflow() %>% 
+                      add_recipe(tree_recipe) %>% 
+                      add_model(tree_model) 
+  
+  set.seed(786)
+  doParallel::registerDoParallel(cores = 9)
+  
+  tree_res =
+    tune_grid(tree_workflow, resamples = tree_boot, 
+                metrics   = metric_set(mae, rmse, rsq),
+    control   = control_grid(save_pred = TRUE),
+              grid = tree_grid)
+  
+
+collect_metrics(tree_res)
+
+  
+show_best(tree_res, metric = "mae")
+show_best(tree_res, metric = "rmse")
+show_best(tree_res, metric = "rsq")
+
+mae_1 = show_best(tree_res, metric = "mae") %>% 
+  slice(1)
+
+
+autoplot(tree_res) +
+  theme_light() +
+  labs(title = "Decision Tree Hyperparameter Tuning", 
+       subtitle = "Bootstrap resamples, n = 30; Analysis set, n = 860, Mean OOB, n = 316 per resample",
+       x = "Cost-complexity Parameter (cp)")
+
+ggsave(
+      "tree_autoplot_mOS.jpg",
+      width = 12,                       
+      height = 6,                      
+      dpi = 600)
+
+    tree_final = 
+    finalize_model(tree_model, mae_1)
+    tree_final
+    
+fit_train = fit(tree_final, Median_OS ~ Median_PFS + ORR + Subtype 
+             + Line_of_Therapy + wECOG + Treatment_Size + Therapy + 
+             HER2_Antibody + Aromatase_Inhibitor + HER2_Kinase_Inhibitor + Antiestrogen + Antimetabolite + Anthracycline + Platinum, 
+                data = tree_train)
+fit_train 
+
+
+#plot the model
+library(rpart.plot)
+
+jpeg("tree_rules_mOS.jpg", width = 9500, height = 6000, res = 900, quality = 100)
+
+fit_train %>% 
+  extract_fit_engine() %>% 
+  rpart.plot()
+  mtext("Decision Rules for Predicting Median OS (Regression Tree)",
+        font = 2, side = 3, line = 2, outer = F, adj= 0.1, cex = 0.65)
+  
+  mtext("Training set (n = 860); cost-complexity (cp) = 3.16e-3; depth = 5; min node size = 40; (MAE 4.54; RMSE 5.86)", font = 1, 
+        side = 1, line = 3.5, adj = 0.1, cex = 0.45)
+
+dev.off()
+
+
+fit_test = last_fit(tree_final, Median_OS ~ Median_PFS + ORR + Subtype 
+             + Line_of_Therapy + wECOG + Treatment_Size + Therapy + 
+             HER2_Antibody + Aromatase_Inhibitor + HER2_Kinase_Inhibitor + Antiestrogen + Antimetabolite + Anthracycline + Platinum, 
+             split = tree_split,
+             metrics   = metric_set(mae, rmse, rsq))
+  
+  collect_metrics(fit_test)
+  
+# plot the variable of importance
+library(vip)
+
+tree_engine = extract_fit_engine(fit_train)
+
+tree_imp = enframe(tree_engine$variable.importance,
+                  name = "Variable", value = "Importance") %>%
+  arrange(desc(Importance)) %>% 
+  mutate(Importance_100 = 100 * Importance / max(Importance, na.rm = TRUE)) %>%
+  slice_max(order_by = Importance, n = 12)
+
+
+
+ggplot(tree_imp, aes(x = Importance_100, y = reorder(Variable, Importance_100))) +
+  geom_segment(aes(x = 0, xend = Importance_100, yend = Variable), 
+               linewidth = 0.35) +
+  geom_point(size = 1) + 
+  labs(title = "Decision Tree Variable Importance Plot",
+       subtitle = "Training set (n = 860); cost-complexity (cp) = 3.16e-3; depth = 5; min node size = 40; (MAE 4.54; RMSE 5.86)",
+       x = "Variable importance (Normalized)",
+       y = NULL) +
+  theme_light(base_size = 5)
+
+ggsave(
+      "tree_vip_mOS.jpg",
+      width = 4,                       
+      height = 2,                      
+      dpi = 900)
+
+
+  ## plot of prediction vs true outcome
+  
+  set.seed(329)
+  de = fit_test %>% 
+  collect_predictions() %>% 
+  ggplot(aes(x= Median_OS, y = .pred)) +
+  geom_abline(intercept = 0,
+              slope = 1,
+              lty= 2,
+              size = 0.5, 
+              color = "darkred",
+              linetype= "dashed") +
+  geom_point(alpha = 0.7, color = "midnightblue", 
+             position = position_jitter(height = 0.45, width = 0)) +
+  scale_y_continuous(limits = c(0, 40)) + 
+   scale_x_continuous(limits = c(0, 50)) +
+  theme_light(base_size = 6) +
+  labs(subtitle = "Decision Tree (MAE 4.32; RMSE 5.66)",
+    x = "Observed Median OS (Months)",
+       y = "Predicted Median OS (Months)",
+    tag = "a") + 
+    theme(plot.tag = element_text(face = "bold"))
+
+  print(de)
+
+  ggsave(
+      "Tree_Pred_mOS.jpg",
+      width = 4,                       
+      height = 3.5,                      
+      dpi = 900)
+
+  
+  cowplot::plot_grid(de, gf, nrow = 1)
+ggsave(
+      "cowplot_Pred_mOS.jpg",
+      width = 8,                       
+      height = 3.5,                      
+      dpi = 900)
+
+```
+
+```{r Finalize dataset for mPFS modeling}
+
+library(stringr)
+library(purrr)
+library(forcats)
+
+
+PFS_df = mBC_Dataset_final %>%
+  select(-mOS_2, -mOS)
+
+PFS_df = PFS_df %>%
+  mutate(Combo_sort = str_squish(Combo),
+    Combo_sort = map_chr(
+      str_split(Combo_sort, "\\s+"),
+      ~ paste(sort(.x), collapse = " ")),
+    Combo_sort = factor(Combo_sort))
+
+view(PFS_df)
+
+```
+
+
+```{r mPFS Random Forest Model}
+
+library(tidymodels)
+
+    set.seed(786)
+    pfs_ranger_split = PFS_df %>% 
+      filter(mPFS_2 < 17) %>% 
+    initial_split(prop = 0.8, 
+                  strata = mPFS_2) #change strata to "Subtype"
+    pfs_ranger_split
+
+
+  pfs_ranger_train = training(pfs_ranger_split)
+  pfs_ranger_test = testing(pfs_ranger_split)
+  
+  
+  
+pfs_ranger_cols_23_44 = names(pfs_ranger_train)[23:44]
+pfs_ranger_cols_23_44 = setdiff(pfs_ranger_cols_23_44, "mPFS_2")
+
+
+pfs_ranger_train_sub = pfs_ranger_train %>%
+  select(mPFS_2, ORR, Subtype, Pretreated, wECOG_2, Size_Cat, Therapy, all_of(pfs_ranger_cols_23_44))
+
+
+pfs_ranger_recipe = recipe(mPFS_2 ~ ., data = pfs_ranger_train_sub) %>% 
+                step_zv(all_numeric_predictors()) %>% 
+                step_normalize(all_numeric_predictors()) %>%
+                step_string2factor() %>% 
+                step_dummy(all_nominal_predictors())
+
+  set.seed(786)
+  pfs_ranger_boot = bootstraps(pfs_ranger_train_sub, times = 30,
+                        strata = mPFS_2)
+
+prep(pfs_ranger_recipe)
+
+    pfs_ranger_spec =  rand_forest(mtry = tune(), 
+                               min_n = tune(), 
+                               trees = 1000) %>% 
+                  set_mode("regression") %>% 
+                  set_engine("ranger", importance = "permutation") 
+  
+    pfs_ranger_workflow = workflow() %>% 
+                      add_recipe(pfs_ranger_recipe) %>% 
+                      add_model(pfs_ranger_spec) 
+  
+
+  pfs_ranger_params = grid_regular(
+  mtry(range  = c(4L, 20L)),
+  min_n(range = c(8L, 40L)),
+  levels = 12)
+  
+  pfs_ranger_params
+      
+  set.seed(786)
+  doParallel::registerDoParallel()
+  
+  pfs_ranger_res =
+    tune_grid(pfs_ranger_workflow, resamples = pfs_ranger_boot, 
+                metrics   = metric_set(mae, rmse, rsq),
+    control   = control_grid(save_pred = TRUE),
+              grid = pfs_ranger_params)
+  
+  show_best(pfs_ranger_res, metric = "mae")
+  show_best(pfs_ranger_res, metric = "rmse")
+  show_best(pfs_ranger_res, metric = "rsq")
+
+    mae_1 =
+    show_best(pfs_ranger_res, metric = "mae") %>% 
+    slice(1)
+
+   autoplot(pfs_ranger_res) +
+    theme_light() +
+  labs(title = "Random Forest Hyperparameter Tuning", 
+       subtitle = "Bootstrap resamples, n = 30; Analysis set, n = 868, Mean OOB, n = 319 per resample",
+       x = "# Randomly Selected Predictors (mtry)")
+
+  ggsave(
+      "rand_forest_autoplot_mPFS.jpg",
+      width = 12,                       
+      height = 6,                      
+      dpi = 600)
+
+
+  pfs_final_ranger = pfs_ranger_workflow %>% 
+    finalize_workflow(mae_1)
+  
+  pfs_final_ranger
+
+  pfs_ranger_fit = last_fit(pfs_final_ranger, pfs_ranger_split,
+                      metrics   = metric_set(mae, rmse, rsq))
+  
+  collect_metrics(pfs_ranger_fit)  
+
+
+library(vip)
+
+pfs_ranger_engine = extract_fit_engine(pfs_ranger_fit)
+pfs_imp_ranger = ranger::importance(pfs_ranger_engine)
+pfs_ranger_imp_df = enframe(pfs_imp_ranger, name = "Variable", value = "Importance") %>%
+  arrange(desc(Importance))
+
+pfs_top10_ranger = pfs_ranger_imp_df %>%
+  slice_max(order_by = Importance, n = 10) %>% 
+    mutate(Importance_100 = 100 * Importance / max(Importance, na.rm = TRUE))
+
+
+ggplot(pfs_top10_ranger, aes(x = Importance_100, 
+                         y = reorder(Variable, Importance))) +
+  geom_segment(aes(x = 0, xend = Importance_100, yend = Variable), 
+               linewidth = 0.35) +
+  geom_point(size = 1) +
+  labs(title = "Random Forest Variable Importance Plot",
+       subtitle = "Training set (n = 868); 1000 trees; mtry = 10; min node size = 21; (MAE 1.75; RMSE 2.34)",
+       x = "Variable importance (Normalized)", 
+       y = NULL) +
+      theme_light(base_size = 5)
+
+
+ggsave(
+      "Rand_Forest_vip_mPFS.jpg",
+      width = 4,                       
+      height = 2,                      
+      dpi = 900)
+
+
+cd = pfs_ranger_fit %>% 
+collect_predictions() %>% 
+  ggplot(aes(x = mPFS_2, y = .pred)) +
+  geom_abline(intercept = 0,
+              slope = 1,
+              lty = 2,
+              size = 0.5, 
+              color = "darkred",
+              linetype = "dashed") +
+  geom_point(alpha = 0.7, color = "midnightblue") +
+  scale_y_continuous(limits = c(0, 20)) + 
+   scale_x_continuous(limits = c(0, 22)) +
+  theme_light(base_size = 6) +
+  labs(subtitle = "Random Forest (MAE 1.58; RMSE 2.12)",
+    x = "Observed Median PFS (Months)",
+       y = "Predicted Median PFS (Months)",
+    tag = "b") +
+    theme(plot.tag = element_text(face = "bold"))
+
+ggsave(
+      "Rand_Forest_Pred_mPFS.jpg",
+      width = 4,                       
+      height = 3.5,                      
+      dpi = 900)
+
+
+```
+
+
+
+```{r mPFS Decision Tree Model}
+
+library(patchwork)
+
+  set.seed(786)
+    pfs_tree_split = PFS_df %>%
+    rename(
+      Median_PFS = mPFS_2, 
+      wECOG_raw = wECOG,
+    wECOG = wECOG_2,
+    Treatment_Size = Size_Cat,
+    Aromatase_Inhibitor = Aromatase,
+    HER2_Kinase_Inhibitor = HER2_Kinase,
+    Line_of_Therapy = Pretreated) %>% 
+    filter(Median_PFS < 17) %>%
+    initial_split(prop = 0.8, 
+                  strata = Median_PFS) # change strata to Subtype
+    
+    pfs_tree_split
+
+
+  pfs_tree_train = training(pfs_tree_split)
+  pfs_tree_test = testing(pfs_tree_split)
+
+
+  pfs_tree_recipe = 
+    recipe(formula = Median_PFS ~ ORR + Subtype + Line_of_Therapy + 
+             wECOG + Treatment_Size + Therapy + 
+             HER2_Antibody + Aromatase_Inhibitor + HER2_Kinase_Inhibitor + Antiestrogen + Antimetabolite 
+           + Anthracycline + Platinum, 
+                data = pfs_tree_train) %>% 
+                step_string2factor(all_nominal_predictors()) %>% 
+                step_zv(all_numeric_predictors()) %>% 
+                step_normalize(all_numeric_predictors())
+
+pfs_tree_recipe
+
+  set.seed(786)
+  pfs_tree_boot = bootstraps(pfs_tree_train, times = 30,
+                        strata = Median_PFS) # change strata to 
+  
+
+pfs_tree_model = decision_tree(
+  cost_complexity = tune(),
+  tree_depth = tune(),
+  min_n = tune()) %>% 
+  set_engine("rpart", model = TRUE) %>% 
+  set_mode("regression")
+
+
+pfs_tree_grid = grid_regular(
+  cost_complexity(),
+  tree_depth(),
+  min_n(), levels = 9)
+
+
+  pfs_tree_workflow =   workflow() %>% 
+                      add_recipe(pfs_tree_recipe) %>% 
+                      add_model(pfs_tree_model) 
+  
+  set.seed(786)
+  doParallel::registerDoParallel()
+  
+  pfs_tree_res =
+    tune_grid(pfs_tree_workflow, resamples = pfs_tree_boot, 
+                metrics   = metric_set(mae, rmse, rsq),
+    control   = control_grid(save_pred = TRUE),
+              grid = pfs_tree_grid)
+  
+
+show_best(pfs_tree_res, metric = "mae")
+show_best(pfs_tree_res_subtype, metric = "rmse")
+show_best(pfs_tree_res_subtype, metric = "rsq")
+
+mae_1 = show_best(pfs_tree_res, metric = "mae") %>% 
+  slice(1)
+
+autoplot(pfs_tree_res_subtype) +
+  theme_light() +
+  labs(title = "Decision Tree Hyperparameter Tuning", 
+       subtitle = "Bootstrap resamples, n = 30; Analysis set, n = 868, Mean OOB, n = 319 per resample",
+       x = "Cost-complexity Parameter (cp)")
+
+ggsave(
+      "tree_autoplot_mPFS.jpg",
+      width = 14,                       
+      height = 6,                      
+      dpi = 600)
+
+  pfs_tree_final = 
+    finalize_model(pfs_tree_model, mae_1)
+    pfs_tree_final
+    
+pfs_fit_train = fit(pfs_tree_final, 
+                    Median_PFS ~ ORR + Subtype + Line_of_Therapy + wECOG +
+                      Treatment_Size + Therapy +  HER2_Antibody +
+                      Aromatase_Inhibitor + HER2_Kinase_Inhibitor + 
+                      Antiestrogen + Antimetabolite + Anthracycline + Platinum,
+                      data = pfs_tree_train)
+  pfs_fit_train 
+
+
+#plot the model
+library(rpart.plot)
+
+jpeg("tree_rules_mPFS.jpg", width = 9500, height = 6000, res = 900, quality = 100)
+
+pfs_fit_train %>% 
+  extract_fit_engine() %>% 
+  rpart.plot()
+
+  mtext("Decision Rules for Predicting Median PFS (Regression Tree)",
+        font = 2, side = 3, line = 2, outer = F, adj= 0.1, cex = 0.65)
+  
+  mtext("Training set (n = 868); cost-complexity (cp) = 3.16e-6; depth = 4; min node size = 40; (MAE 1.91; RMSE 2.51)", font = 1, 
+        side = 1, line = 3.5, adj = 0.1, cex = 0.45)
+
+dev.off()
+
+
+pfs_fit_test = last_fit(pfs_tree_final, 
+                        Median_PFS ~ ORR + Subtype + Line_of_Therapy + wECOG + 
+                          Treatment_Size + Therapy + HER2_Antibody + 
+                          Aromatase_Inhibitor + HER2_Kinase_Inhibitor + 
+                          Antiestrogen + Antimetabolite + Anthracycline +
+                          Platinum, 
+                          split = pfs_tree_split,
+                          metrics   = metric_set(mae, rmse, rsq))
+  
+  collect_metrics(pfs_fit_test)
+  
+# plot the variable of importance
+library(vip)
+
+pfs_tree_engine = extract_fit_engine(pfs_fit_train)
+
+pfs_tree_imp = enframe(pfs_tree_engine$variable.importance,
+                  name = "Variable", value = "Importance") %>%
+  arrange(desc(Importance)) %>% 
+  mutate(Importance_100 = 100 * Importance / max(Importance, na.rm = TRUE)) %>%
+  slice_max(order_by = Importance, n = 10)
+
+
+ggplot(pfs_tree_imp, aes(x = Importance_100, 
+                         y = reorder(Variable, Importance_100))) +
+  geom_segment(aes(x = 0, xend = Importance_100, yend = Variable), 
+               linewidth = 0.35) +
+  geom_point(size = 1) + 
+  labs(title = "Decision Tree Variable Importance Plot",
+       subtitle = "Training set (n = 868); cost-complexity (cp) = 1e-4; depth = 5; min node size = 40; (MAE 1.92; RMSE 2.51)",
+       x = "Variable importance (Normalized)",
+       y = NULL)  +
+  theme_light(base_size = 5)
+
+  ggsave(
+      "tree_vip_mPFS.jpg",
+      width = 4,                       
+      height = 2,                      
+      dpi = 900)
+
+
+  ## plot of prediction vs true outcome
+  
+  set.seed(786)
+  ab =  pfs_fit_test %>% 
+  collect_predictions() %>% 
+  ggplot(aes(x = Median_PFS, y = .pred)) +
+  geom_abline(intercept = 0,
+              slope = 1,
+              lty= 2,
+              size = 0.5, 
+              color = "darkred",
+              linetype= "dashed") +
+  geom_point(alpha = 0.7, color = "midnightblue", 
+             position = position_jitter(height = 0.45, width = 0)) +
+  scale_y_continuous(limits = c(0, 20)) + 
+   scale_x_continuous(limits = c(0, 22)) +
+  theme_light(base_size = 6) +
+  labs(subtitle = "Decision Tree (MAE 1.72; RMSE 2.28)",
+    x = "Observed Median PFS (Months)",
+       y = "Predicted Median PFS (Months)",
+    tag = "a") +
+       theme(plot.tag = element_text(face = "bold"))
+
+ggsave(
+      "Tree_Pred_mPFS.jpg",
+      width = 4,                       
+      height = 3.5,                      
+      dpi = 900)
+
+
+cowplot::plot_grid(ab, cd, nrow = 1)
+ggsave(
+      "cowplot_Pred_PFS.jpg",
+      width = 8,                       
+      height = 3.5,                      
+      dpi = 900)
+
+
+```
+
