@@ -14,7 +14,7 @@ version: 1.0.0
 date-released: 2026-02-01
 keywords:
   - advanced breast cancer
-  - surrogate endpoints
+  - Clinical decision support 
   - progression-free survival
   - overall survival
   - decision tree
