@@ -5,9 +5,9 @@
 
 ## Overview
 
-This repository contains the data and code for the study entitled **"Interpretable Machine Learning to Predict Progression-free and Overall Survival in Advanced Breast Cancer Clinical Trials"**
+This repository contains the data and code for the study entitled **"Interpretable machine learning for predicting progression-free and overall survival in metastatic breast cancer phase II trials"**
 
-We analyzed 2,622 efficacy endpoints from 892 phase II trials in advanced breast cancer to:
+We analyzed 2,622 efficacy endpoints from 892 phase II trials in metastatic breast cancer to:
 1. Examine correlations among surrogate endpoints (ORR, mPFS, mOS)
 2. Develop interpretable machine learning models to predict median progression-free survival (mPFS) and median overall survival (mOS)
 
@@ -21,8 +21,8 @@ We analyzed 2,622 efficacy endpoints from 892 phase II trials in advanced breast
 
 ```
 ├── data/
-│   ├── mBC_Dataset.xlsx       # Main dataset (1,088 trial arms, 25 variables)
-│   └── mBC_Combo.xlsx         # Treatment combination flags (22 drug class indicators)
+│   ├── MBC_Dataset.xlsx       # Main dataset (1,088 trial arms, 25 variables)
+│   └── MBC_Combo.xlsx         # Treatment combination flags (22 drug class indicators)
 ├── code/
 │   └── Survival_Modeling_mBC.Rmd   # Complete analysis pipeline
 ├── figures/                   # Generated figures (after running code)
@@ -33,7 +33,7 @@ We analyzed 2,622 efficacy endpoints from 892 phase II trials in advanced breast
 
 ## Data Description
 
-### mBC_Dataset.xlsx
+### MBC_Dataset.xlsx
 
 Primary dataset containing trial-level efficacy endpoints and characteristics:
 
@@ -53,7 +53,7 @@ Primary dataset containing trial-level efficacy endpoints and characteristics:
 | Size | Number of agents (1-Agent, 2-Agent, 3-Agent) |
 | T1–T4 | Individual treatment names |
 
-### mBC_Combo.xlsx
+### MBC_Combo.xlsx
 
 Binary indicators for 22 drug classes:
 
@@ -81,27 +81,25 @@ install.packages(c("tidymodels", "ranger", "rpart", "rpart.plot", "vip", "finetu
 # Visualization
 install.packages(c("ggplot2", "ggstatsplot", "viridis", "cowplot", "patchwork"))
 
-# Parallel processing
-install.packages("doParallel")
 ```
 
 ## Usage
 
 1. Clone the repository:
-```bash
+```bash or zsh
 git clone https://github.com/[username]/survival-prediction-breast-cancer.git
 cd survival-prediction-breast-cancer
 ```
 
 2. Open the R Markdown file in RStudio:
 ```r
-file.edit("code/Survival_Modeling_mBC.Rmd")
+file.edit("code/Survival_Modeling_MBC.Rmd")
 ```
 
 3. Set working directory and run the analysis:
 ```r
 setwd("path/to/repository")
-rmarkdown::render("code/Survival_Modeling_mBC.Rmd")
+rmarkdown::render("code/Survival_Modeling_MBC.Rmd")
 ```
 
 ## Analysis Pipeline
@@ -112,7 +110,7 @@ The R Markdown file contains the following sections:
 2. **Missing Data Imputation**: MICE with CART algorithm (m=20, maxit=30)
 3. **Feature Engineering**: Create derived variables, combine datasets
 4. **Imputation Quality Assessment**: Density plots comparing distributions
-5. **Correlation Analysis**: Spearman correlations among ORR, mPFS, mOS
+5. **Correlation Analysis**: Spearman rank correlations among ORR, mPFS, mOS
 6. **mOS Modeling**:
    - mOS random forest model
    - mOS decision tree model 
@@ -131,7 +129,7 @@ The R Markdown file contains the following sections:
 If you use this code or data, please cite:
 
 ```
-[Author names]. Interpretable Machine Learning to Predict Progression-free and Overall Survival in Advanced Breast Cancer Clinical Trials. [Journal]. [Year]. DOI: [pending]
+[Author names]. Interpretable machine learning for predicting progression-free and overall survival in metastatic breast cancer phas II trials. [Journal]. [Year]. DOI: [pending]
 ```
 
 ## License
@@ -141,7 +139,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Contact
 
 For questions or collaboration inquiries, please contact:
-Faruque Azam at walid2372@gmail.com
+Faruque Azam at faruque.azam@bracu.ac.bd; walid2372@gmail.com
 
 ## Acknowledgments
 
