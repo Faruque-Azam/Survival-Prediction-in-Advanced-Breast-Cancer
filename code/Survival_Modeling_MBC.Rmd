@@ -1,5 +1,5 @@
 ---
-title: "Modeling OS in mBC"
+title: "Modeling PFS and OS in MBC phase II trials"
 author: "Faruque Azam"
 date: "2026-01-03"
 output: html_document
@@ -9,7 +9,7 @@ output: html_document
 ```{r importing dataset and formatting variables, include=FALSE, results='hide'}
 library(tidyverse)
 library(readxl)
-mBC_Dataset_raw = read_excel("mBC_Dataset.xlsx")
+mBC_Dataset_raw = read_excel("MBC_Dataset.xlsx")
 View(mBC_Dataset_raw)
 
 mBC_Dataset_raw = mBC_Dataset_raw %>% 
@@ -31,7 +31,7 @@ mutate(across(where(is.character), as.factor)) %>%
       ordered = TRUE))
 
 
-df_Combo = read_excel("mBC_Combo.xlsx") %>% 
+df_Combo = read_excel("MBC_Combo.xlsx") %>% 
   mutate(across(where(is.numeric), as.factor))
 
 ```
@@ -311,7 +311,7 @@ library(tidymodels)
     ranger_split = mBC_Dataset_OS %>% 
     filter(mOS_2 < 51) %>% 
     initial_split(prop = 0.8, 
-                  strata = mOS_2) #change strata to "Subtype"
+                  strata = mOS_2) #change strata to "Subtype" if needed
     ranger_split
 
 
@@ -334,7 +334,7 @@ ranger_recipe = recipe(mOS_2 ~ ., data = ranger_train_sub) %>%
 
   set.seed(2372)
   ranger_boot = bootstraps(ranger_train_sub, times = 30,
-                        strata = mOS_2) #change strata to "Subtype"
+                        strata = mOS_2) #change strata to "Subtype" if needed
 
 prep(ranger_recipe)
 
@@ -477,7 +477,7 @@ library(patchwork)
     Line_of_Therapy = Pretreated) %>% 
     filter(Median_OS < 51) %>% 
     initial_split(prop = 0.8, 
-                  strata = Subtype) #change strata to "Subtype"
+                  strata = Subtype) #change strata to "Median_OS" if needed
     
   tree_split
 
@@ -690,7 +690,7 @@ library(tidymodels)
     pfs_ranger_split = PFS_df %>% 
       filter(mPFS_2 < 17) %>% 
     initial_split(prop = 0.8, 
-                  strata = mPFS_2) #change strata to "Subtype"
+                  strata = mPFS_2) #change strata to "Subtype" if needed
     pfs_ranger_split
 
 
@@ -855,7 +855,7 @@ library(patchwork)
     Line_of_Therapy = Pretreated) %>% 
     filter(Median_PFS < 17) %>%
     initial_split(prop = 0.8, 
-                  strata = Median_PFS) # change strata to Subtype
+                  strata = Median_PFS) # change strata to "Subtype" if needed
     
     pfs_tree_split
 
@@ -910,8 +910,8 @@ pfs_tree_grid = grid_regular(
   
 
 show_best(pfs_tree_res, metric = "mae")
-show_best(pfs_tree_res_subtype, metric = "rmse")
-show_best(pfs_tree_res_subtype, metric = "rsq")
+show_best(pfs_tree_res, metric = "rmse")
+show_best(pfs_tree_res, metric = "rsq")
 
 mae_1 = show_best(pfs_tree_res, metric = "mae") %>% 
   slice(1)
