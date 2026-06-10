@@ -25,6 +25,7 @@ We analyzed 2,622 efficacy endpoints from 892 phase II trials in metastatic brea
 │   └── MBC_Combo.xlsx         # Treatment combination flags (22 drug class indicators)
 ├── code/
 │   └── Survival_Modeling_mBC.Rmd   # Complete analysis pipeline
+|   └── TrialTree-MBC.R        # Shiny/R interactive web app for predicting mPFS and mOS
 ├── figures/                   # Generated figures (after running code)
 ├── README.md
 ├── LICENSE
